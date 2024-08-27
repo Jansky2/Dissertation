@@ -1,1 +1,147 @@
 
+import matplotlib.pyplot as plt
+import numpy as np
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import netCDF4
+from scipy import signal
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.ticker as mticker
+from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
+from cartopy.io.shapereader import natural_earth
+import cartopy.io.shapereader as shpreader
+import shapely.geometry as sgeom
+
+
+# Butterworth low-pass filter function
+def butterworth_lowpass_filter(data, cutoff_time, axis=0, chunk_size=1000):
+    cutoff_freq = 1 / cutoff_time
+    nyquist_freq = 0.5
+    normalized_cutoff_freq = cutoff_freq / nyquist_freq
+    order = 4
+
+    B, A = signal.butter(order, normalized_cutoff_freq, btype='low', analog=False, output='ba')
+    filtered_data = np.empty_like(data)
+
+    num_chunks = (data.shape[0] + chunk_size - 1) // chunk_size
+    for i in range(num_chunks):
+        start = i * chunk_size
+        end = min(start + chunk_size, data.shape[0])
+        filtered_data[start:end, :, :] = signal.filtfilt(B, A, data[start:end, :, :], axis=0)
+
+    return filtered_data
+
+
+# Load SST data from both files
+file_path_1 = "C:/Users/Janki/Downloads/AVHRR_SST_SIC (2)/SST_ICE_regrid.nc"
+file_path_2 = "C:/Users/Janki/Downloads/SST_ICE_regrid_150daylow.nc"
+
+# Load data from the first file
+sst_data_1 = netCDF4.Dataset(file_path_1, 'r')
+lat = sst_data_1.variables['yt_ocean'][:]
+lon = sst_data_1.variables['xt_ocean'][:]
+sst_values_1 = sst_data_1.variables['SST_REGRID'][:]
+
+# Load data from the second file
+sst_data_2 = netCDF4.Dataset(file_path_2, 'r')
+sst_values_2 = sst_data_2.variables['SST_150DAYLOW'][:]
+
+# Calculate 150-day low-pass filter for the first file
+cutoff_time = 150  # 150 days
+filtered_sst_1 = butterworth_lowpass_filter(sst_values_1, cutoff_time, axis=0)
+
+# Compute the difference between the filtered data from the first file and the pre-filtered data from the second file
+sst_diff =  sst_values_2 - filtered_sst_1
+
+# Define the range of years
+start_year = 2011
+end_year = 2023
+
+# Function to calculate indices for December, January, and February of a given year
+def calculate_indices(year):
+    dec_index = 365 * (year - 2000) + 334   # December 1st
+    jan_index = 365 * (year - 2000 + 1)     # January 1st
+    feb_index = 365 * (year - 2000 + 1) + 31 # February 1st
+    return dec_index, jan_index, feb_index
+
+# Set up the figure and subplots
+fig, axes = plt.subplots(nrows=3, ncols=4, figsize=(20, 15), subplot_kw={'projection': ccrs.Stereographic(central_longitude=0, central_latitude=-90)})
+axes = axes.flatten()
+
+# Color scale range
+vmin = -4
+vmax = 4
+
+# Load a land feature mask
+land_feature = cfeature.NaturalEarthFeature(
+    'physical', 'land', '50m',
+    edgecolor='black', facecolor='white')
+
+# Loop through each year and plot the difference
+for i, year in enumerate(range(start_year, end_year)):
+    dec_index, jan_index, feb_index = calculate_indices(year)
+
+    # Compute the austral summer average (December of the previous year, January and February of the current year)
+    sst_diff_austral_summer_avg = np.ma.mean([sst_diff[dec_index, :, :],
+                                              sst_diff[jan_index, :, :],
+                                              sst_diff[feb_index, :, :]], axis=0)
+
+    # Create a mask to hide regions above -60° latitude
+    mask = np.where(lat < -60, 1, np.nan)
+    sst_diff_austral_summer_avg = sst_diff_austral_summer_avg * mask[:, np.newaxis]
+
+    # Plotting
+    ax_sst = axes[i]
+    pcm_sst = ax_sst.pcolormesh(lon, lat, sst_diff_austral_summer_avg, cmap='seismic', shading='auto', vmin=vmin, vmax=vmax, transform=ccrs.PlateCarree())
+
+    # Add coastlines
+    ax_sst.add_feature(cfeature.COASTLINE)
+
+    # Add longitude lines
+    for lon_line in [20, 90, 160, 230, 300]:
+        ax_sst.plot([lon_line, lon_line], [-90, -60], color='black', linestyle='-', transform=ccrs.PlateCarree())
+
+    # Add labels for regions
+    ax_sst.text(40, -80, '(IO)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(120, -80, '(PO)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(200, -60, '(RS)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(280, -60, '(BAS)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+    # Add longitude labels
+    ax_sst.text(20, -60, '(20E)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(90, -60, '(90E)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(160, -60, '(160E)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(230, -60, '(230E)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax_sst.text(300, -60, '(300E)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+    # Zoom into Antarctica by setting the extent
+    ax_sst.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Add the land mask feature for Antarctica
+    ax_sst.add_feature(land_feature)
+
+    # Set the title for each subplot
+    ax_sst.set_title(f'Austral Summer Difference {year}-{year+1}', fontsize=10)
+
+    # Add colorbar for SST difference
+    divider_sst = make_axes_locatable(ax_sst)
+    cax_sst = divider_sst.append_axes("right", size="5%", pad=0.1, axes_class=plt.Axes)
+    fig.colorbar(pcm_sst, cax=cax_sst, extend='both', orientation='vertical').set_label('SST Difference (°C)', fontsize=8)
+
+# Gridlines
+for ax in axes.flat:
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1, color='gray', alpha=0.5, linestyle='--')
+    gl.ylocator = mticker.FixedLocator([-80, -70, -60])
+    gl.xlines = False
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.axis('off')
+
+# Adjust layout and show plot
+plt.tight_layout()
+plt.show()
