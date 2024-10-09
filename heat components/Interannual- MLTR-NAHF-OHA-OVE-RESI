@@ -1,0 +1,213 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import netCDF4
+from netCDF4 import num2date
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from scipy.signal import butter, filtfilt
+import matplotlib.ticker as mticker
+from scipy import signal
+
+
+
+# Define the Butterworth low-pass filter function
+def butterworth_lowpass_filter(data, cutoff_time, axis=0):
+    cutoff_freq = 1 / cutoff_time
+    nyquist_freq = 0.5
+    normalized_cutoff_freq = cutoff_freq / nyquist_freq
+    order = 4
+
+    B, A = signal.butter(order, normalized_cutoff_freq, btype='low', analog=False, output='ba')
+    filtered_data = signal.filtfilt(B, A, data, axis=axis)
+
+    return filtered_data
+
+
+# Load the dataset for both 2015 and 2016
+file_path_2015 = "C:/Users/Janki/Downloads/heat budget data/heatbudget_AB_clim_mdppm_2022.nc"
+file_path_2016 = "C:/Users/Janki/Downloads/heat budget data/heatbudget_AB_clim_mdppm_2023.nc"
+
+heat_data_2015 = netCDF4.Dataset(file_path_2015, 'r')
+heat_data_2016 = netCDF4.Dataset(file_path_2016, 'r')
+
+
+# Load TIME variables from both files
+time_var_2015 = heat_data_2015.variables['TIME']
+time_var_2016 = heat_data_2016.variables['TIME']
+time_2015 = num2date(time_var_2015[:], units=time_var_2015.units)
+time_2016 = num2date(time_var_2016[:], units=time_var_2016.units)
+
+# Create masks for December 2015 and January-February 2016
+time_mask_2015 = np.array([(date.month == 12 and date.year == 2022) for date in time_2015])
+time_mask_2016 = np.array([(date.month in [1, 2] and date.year == 2023) for date in time_2016])
+
+# Load latitude and longitude variables
+lat = heat_data_2015.variables['YT_OCEAN'][:]
+lon = heat_data_2015.variables['XT_OCEAN81_440'][:]
+
+# Extract variables
+mltr_values_2015 = np.ma.filled(heat_data_2015.variables['DT_DT'][time_mask_2015, :, :], np.nan)
+mltr_values_2016 = np.ma.filled(heat_data_2016.variables['DT_DT'][time_mask_2016, :, :], np.nan)
+nahf_values_2015 = np.ma.filled(heat_data_2015.variables['F'][time_mask_2015, :, :], np.nan)
+nahf_values_2016 = np.ma.filled(heat_data_2016.variables['F'][time_mask_2016, :, :], np.nan)
+ax_values_2015 = np.ma.filled(heat_data_2015.variables['AX'][time_mask_2015, :, :], np.nan)
+ax_values_2016 = np.ma.filled(heat_data_2016.variables['AX'][time_mask_2016, :, :], np.nan)
+ay_values_2015 = np.ma.filled(heat_data_2015.variables['AY'][time_mask_2015, :, :], np.nan)
+ay_values_2016 = np.ma.filled(heat_data_2016.variables['AY'][time_mask_2016, :, :], np.nan)
+az_values_2015 = np.ma.filled(heat_data_2015.variables['AZ'][time_mask_2015, :, :], np.nan)
+az_values_2016 = np.ma.filled(heat_data_2016.variables['AZ'][time_mask_2016, :, :], np.nan)
+et1_values_2015 = np.ma.filled(heat_data_2015.variables['E_T1'][time_mask_2015, :, :], np.nan)
+et1_values_2016 = np.ma.filled(heat_data_2016.variables['E_T1'][time_mask_2016, :, :], np.nan)
+et2_values_2015 = np.ma.filled(heat_data_2015.variables['E_T2'][time_mask_2015, :, :], np.nan)
+et2_values_2016 = np.ma.filled(heat_data_2016.variables['E_T2'][time_mask_2016, :, :], np.nan)
+
+# Combine the data for MLTR, NAHF, Ax, Ay, AZ, E_T1, and E_T2
+mltr_values_combined = np.concatenate([mltr_values_2015, mltr_values_2016], axis=0)
+nahf_values_combined = np.concatenate([nahf_values_2015, nahf_values_2016], axis=0)
+ax_values_combined = np.concatenate([ax_values_2015, ax_values_2016], axis=0)
+ay_values_combined = np.concatenate([ay_values_2015, ay_values_2016], axis=0)
+az_values_combined = np.concatenate([az_values_2015, az_values_2016], axis=0)
+et1_values_combined = np.concatenate([et1_values_2015, et1_values_2016], axis=0)
+et2_values_combined = np.concatenate([et2_values_2015, et2_values_2016], axis=0)
+
+# Combine ax, ay, az, et1, and et2 to create additional variables
+oha_values_combined = ax_values_combined + ay_values_combined
+ove_values_combined = az_values_combined + et1_values_combined + et2_values_combined
+residual = mltr_values_combined - (oha_values_combined + ove_values_combined)
+
+mltr_values_combined = np.nan_to_num(mltr_values_combined, nan=0.0)
+nahf_values_combined = np.nan_to_num(nahf_values_combined, nan=0.0)
+oha_values_combined = np.nan_to_num(oha_values_combined, nan=0.0)
+ove_values_combined = np.nan_to_num(ove_values_combined, nan=0.0)
+residual= np.nan_to_num(residual, nan=0.0)
+
+
+
+mltr_filtered = butterworth_lowpass_filter(mltr_values_combined, 400, axis=0)
+nahf_filtered = butterworth_lowpass_filter(nahf_values_combined, 400, axis=0)
+oha_filtered = butterworth_lowpass_filter(oha_values_combined, 400, axis=0)
+ove_filtered = butterworth_lowpass_filter(ove_values_combined, 400, axis=0)
+
+# Calculate mean values for the filtered components
+mltr_mean_filtered = np.nanmean(mltr_filtered, axis=0)
+nahf_mean_filtered = np.nanmean(nahf_filtered, axis=0)
+oha_mean_filtered = np.nanmean(oha_filtered, axis=0)
+ove_mean_filtered = np.nanmean(ove_filtered, axis=0)
+
+# Calculate Residual for the filtered data
+residual_mean_filtered = mltr_mean_filtered - (oha_mean_filtered + ove_mean_filtered)
+
+# Mask out the extra region (lat < -60)
+mask = np.where(lat[:, np.newaxis] <= -60, 1, np.nan)
+masked_mltr_mean_filtered = np.where(np.isnan(mask), np.nan, mltr_mean_filtered)
+masked_nahf_mean_filtered = np.where(np.isnan(mask), np.nan, nahf_mean_filtered)
+masked_oha_mean_filtered= np.where(np.isnan(mask), np.nan, oha_mean_filtered)
+masked_ove_mean_filtered = np.where(np.isnan(mask), np.nan, ove_mean_filtered)
+masked_residual_mean_filtered = np.where(np.isnan(mask), np.nan, residual_mean_filtered)
+
+
+
+# Define masked data for each variable
+masked_data_filtered = {
+    'MLTR 2022': masked_mltr_mean_filtered,
+    'NAHF 2022': masked_nahf_mean_filtered,
+    'OHA 2022': masked_oha_mean_filtered,
+    'OVE 2022': masked_ove_mean_filtered,
+    'Residual 2022': masked_residual_mean_filtered
+}
+
+
+vmin = -0.15
+vmax = 0.15
+
+
+# Create the figure and axes
+fig, axes = plt.subplots(nrows=1, ncols=5, figsize=(15, 10), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+# Create land feature for masking
+land_feature = cfeature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='k', facecolor='white')
+
+
+
+for i, (title, data) in enumerate(masked_data_filtered.items()):
+    ax = axes.flat[i]
+    # Add land feature for masking
+
+    # Add coastline and borders
+    ax.add_feature(cfeature.COASTLINE)
+
+
+
+# Iterate over the masked data and create each plot
+for i, (title, data) in enumerate(masked_data_filtered.items()):
+    ax = axes.flat[i]
+
+    for lon_line in [20, 90, 160, 230, 300]:
+        ax.plot([lon_line, lon_line], [-90, -60], color='black', linestyle='-', transform=ccrs.PlateCarree())
+
+    # Calculate mean values for the 5 regions
+    mean_io = np.nanmean(data[:, (lon >= 20) & (lon <= 90)], axis=(0, 1))
+    mean_po = np.nanmean(data[:, (lon >= 90) & (lon <= 160)], axis=(0, 1))
+    mean_rs = np.nanmean(data[:, (lon >= 160) & (lon <= 230)], axis=(0, 1))
+    mean_bas = np.nanmean(data[:, (lon >= 230) & (lon <= 300)], axis=(0, 1))
+    mean_ws = np.nanmean(data[:, ((lon >= 300) & (lon <= 360)) | ((lon >= 0) & (lon <= 20))], axis=(0, 1))
+
+    # Display mean values as text on the plot
+    ax.text(40, -80, f'(IO): {mean_io:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(120, -80, f'(PO): {mean_po:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(200, -60, f'(RS): {mean_rs:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(260, -55, f'(BAS): {mean_bas:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(340, -65, f'(WS): {mean_ws:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+
+    ax.text(20, -60, '(20)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(90, -60, '(90)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(160, -60, '(160)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(230, -60, '(230)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(300, -60, '(300)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+
+
+    # Add gridlines
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.5, color='gray', alpha=0.5,
+                      linestyle='--')
+    gl.ylocator = mticker.FixedLocator([-90, -80, -70, -60])
+    gl.xlines = False
+    gl.ylabel_style = {'size': 12, 'color': 'black'}
+    gl.xlabel_style = {'size': 12, 'color': 'black'}
+    gl.xlines = False
+
+    # Remove axis ticks and labels
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.axis('off')
+
+    # Add land feature for masking
+    ax.add_feature(land_feature)
+
+
+    # Plot the data using pcolormesh
+    pcm = ax.pcolormesh(lon, lat, data, cmap='seismic', shading='auto', vmin=vmin, vmax=vmax,
+                        transform=ccrs.PlateCarree())
+
+    # Set plot extent and title
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+    ax.set_title(title, fontsize=14)
+
+    # Calculate mean values for the 5 regions
+    mean_io = np.nanmean(data[:, (lon >= 20) & (lon <= 90)], axis=(0, 1))
+    mean_po = np.nanmean(data[:, (lon >= 90) & (lon <= 160)], axis=(0, 1))
+    mean_ao = np.nanmean(data[:, (lon >= -20) & (lon <= 20)], axis=(0, 1))
+    mean_as = np.nanmean(data[:, (lon >= 50) & (lon <= 100)], axis=(0, 1))
+
+
+    plt.subplots_adjust(right=0.878, left=0.02, bottom=0.015, top=0.985, wspace=0.256, hspace=0.2)
+    cbar_ax = fig.add_axes([0.92, 0.3, 0.02, 0.4])
+    fig.colorbar(pcm, cax=cbar_ax, label='SI Unit: °C/day')
+
+
+# Adjust layout
+output_path = "C:/Users/Janki/Downloads/4 pdf/heat data/FINAL/figure 8/2022.png"
+
+plt.savefig(output_path, bbox_inches='tight', dpi=300)
+
