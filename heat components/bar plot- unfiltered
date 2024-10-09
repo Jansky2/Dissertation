@@ -1,0 +1,252 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import netCDF4
+from netCDF4 import num2date
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from scipy.signal import butter, filtfilt
+import matplotlib.ticker as mticker
+from scipy import signal
+
+
+
+# Define the Butterworth low-pass filter function
+def butterworth_lowpass_filter(data, cutoff_time, axis=0):
+    cutoff_freq = 1 / cutoff_time
+    nyquist_freq = 0.5
+    normalized_cutoff_freq = cutoff_freq / nyquist_freq
+    order = 4
+
+    B, A = signal.butter(order, normalized_cutoff_freq, btype='low', analog=False, output='ba')
+    filtered_data = signal.filtfilt(B, A, data, axis=axis)
+
+    return filtered_data
+
+
+# Load the dataset for both 2015 and 2016
+file_path_2015 = "C:/Users/Janki/Downloads/heat budget data/heatbudget_AB_clim_mdppm_2021.nc"
+file_path_2016 = "C:/Users/Janki/Downloads/heat budget data/heatbudget_AB_clim_mdppm_2022.nc"
+
+heat_data_2015 = netCDF4.Dataset(file_path_2015, 'r')
+heat_data_2016 = netCDF4.Dataset(file_path_2016, 'r')
+
+# Load TIME variables from both files
+time_var_2015 = heat_data_2015.variables['TIME']
+time_var_2016 = heat_data_2016.variables['TIME']
+time_2015 = num2date(time_var_2015[:], units=time_var_2015.units)
+time_2016 = num2date(time_var_2016[:], units=time_var_2016.units)
+
+# Create masks for December 2015 and January-February 2016
+time_mask_2015 = np.array([(date.month == 12 and date.year == 2021) for date in time_2015])
+time_mask_2016 = np.array([(date.month in [1, 2] and date.year == 2022) for date in time_2016])
+
+# Load latitude and longitude variables
+lat = heat_data_2015.variables['YT_OCEAN'][:]
+lon = heat_data_2015.variables['XT_OCEAN81_440'][:]
+
+# Extract variables
+mltr_values_2015 = np.ma.filled(heat_data_2015.variables['DT_DT'][time_mask_2015, :, :], np.nan)
+mltr_values_2016 = np.ma.filled(heat_data_2016.variables['DT_DT'][time_mask_2016, :, :], np.nan)
+nahf_values_2015 = np.ma.filled(heat_data_2015.variables['F'][time_mask_2015, :, :], np.nan)
+nahf_values_2016 = np.ma.filled(heat_data_2016.variables['F'][time_mask_2016, :, :], np.nan)
+ax_values_2015 = np.ma.filled(heat_data_2015.variables['AX'][time_mask_2015, :, :], np.nan)
+ax_values_2016 = np.ma.filled(heat_data_2016.variables['AX'][time_mask_2016, :, :], np.nan)
+ay_values_2015 = np.ma.filled(heat_data_2015.variables['AY'][time_mask_2015, :, :], np.nan)
+ay_values_2016 = np.ma.filled(heat_data_2016.variables['AY'][time_mask_2016, :, :], np.nan)
+az_values_2015 = np.ma.filled(heat_data_2015.variables['AZ'][time_mask_2015, :, :], np.nan)
+az_values_2016 = np.ma.filled(heat_data_2016.variables['AZ'][time_mask_2016, :, :], np.nan)
+et1_values_2015 = np.ma.filled(heat_data_2015.variables['E_T1'][time_mask_2015, :, :], np.nan)
+et1_values_2016 = np.ma.filled(heat_data_2016.variables['E_T1'][time_mask_2016, :, :], np.nan)
+et2_values_2015 = np.ma.filled(heat_data_2015.variables['E_T2'][time_mask_2015, :, :], np.nan)
+et2_values_2016 = np.ma.filled(heat_data_2016.variables['E_T2'][time_mask_2016, :, :], np.nan)
+
+# Combine the data for MLTR, NAHF, Ax, Ay, AZ, E_T1, and E_T2
+mltr_values_combined = np.concatenate([mltr_values_2015, mltr_values_2016], axis=0)
+nahf_values_combined = np.concatenate([nahf_values_2015, nahf_values_2016], axis=0)
+ax_values_combined = np.concatenate([ax_values_2015, ax_values_2016], axis=0)
+ay_values_combined = np.concatenate([ay_values_2015, ay_values_2016], axis=0)
+az_values_combined = np.concatenate([az_values_2015, az_values_2016], axis=0)
+et1_values_combined = np.concatenate([et1_values_2015, et1_values_2016], axis=0)
+et2_values_combined = np.concatenate([et2_values_2015, et2_values_2016], axis=0)
+
+
+
+
+
+# Combine ax, ay, az, et1, and et2 to create additional variables
+oha_values_combined = ax_values_combined + ay_values_combined
+ove_values_combined = az_values_combined + et1_values_combined + et2_values_combined
+residual = mltr_values_combined - (oha_values_combined + ove_values_combined)
+
+mltr_values_combinedd = np.nan_to_num(mltr_values_combined, nan= 0.0)
+oha_values_combined = np.nan_to_num(oha_values_combined, nan=0.0)
+
+ove_values_combined = np.nan_to_num(ove_values_combined, nan=0.0)
+residual= np.nan_to_num(residual, nan=0.0)
+
+
+
+
+
+
+
+# Define the OHA components
+oha_unfilter = residual# Unfiltered OHA
+oha_intraseasonal = oha_unfilter - butterworth_lowpass_filter(residual, 150,
+                                                              axis=0)  # Intraseasonal (high-pass)
+oha_seasonal = butterworth_lowpass_filter(residual,150, axis=0) - butterworth_lowpass_filter(residual, 400, axis=0)  # Seasonal (150-400 day band-pass)
+oha_interannual = butterworth_lowpass_filter(residual, 400, axis=0)  # Interannual (400-day low-pass)
+
+
+
+sum_of_components = oha_interannual + oha_seasonal + oha_intraseasonal
+
+# Check if the sum is equal to the unfiltered data
+superposition_check = np.allclose(oha_unfilter, sum_of_components)
+
+# Print the result
+if superposition_check:
+    print("Superposition holds: The sum of intraseasonal, seasonal, and interannual equals the unfiltered data.")
+else:
+    print("Superposition does NOT hold: There is a discrepancy between the sum of components and the unfiltered data.")
+
+oha_unfilter= np.average(oha_unfilter, axis=0)
+oha_intraseasonal = np.average(oha_intraseasonal, axis=0)
+oha_seasonal= np.average(oha_seasonal, axis=0)
+oha_interannual = np.average(oha_interannual, axis=0)
+
+
+# Mask data for latitudes < -60
+mask = np.where(lat[:, np.newaxis] <= -60, 1, np.nan)
+
+oha_unfilter = np.where(np.isnan(mask), np.nan, oha_unfilter)
+ove_intraseasonal = np.where(np.isnan(mask), np.nan, oha_intraseasonal)
+ove_seasonal = np.where(np.isnan(mask), np.nan, oha_seasonal)
+ove_interannual = np.where(np.isnan(mask), np.nan, oha_interannual)
+
+
+# Combine these components into a dictionary for plotting
+masked_oha_components = {
+    'NAHF Unfiltered 2016': oha_unfilter,
+    'NAHF Intraseasonal 2016': ove_intraseasonal,
+    'NAHF Seasonal 2016': ove_seasonal,
+    'NAHF Interannual 2016': ove_interannual
+}
+
+
+
+sum_of_components = ove_interannual + ove_seasonal + ove_intraseasonal
+
+# Check if the sum is equal to the unfiltered data
+superposition_check = np.allclose(mltr_values_combined, sum_of_components)
+
+# Print the result
+if superposition_check:
+    print("Superposition holds: The sum of intraseasonal, seasonal, and interannual equals the unfiltered data.")
+else:
+    print("Superposition does NOT hold: There is a discrepancy between the sum of components and the unfiltered data.")
+
+
+
+
+    # Assuming masked_oha_components holds the data for each component
+    masked_oha_components = {
+        'MLTR Unfiltered': oha_unfilter,
+        'MLTR Intraseasonal': ove_intraseasonal,
+        'MLTR Seasonal': ove_seasonal,
+        'MLTR Interannual': ove_interannual
+    }
+
+    # Initialize a dictionary to store mean values for each region
+    mean_values = {}
+
+    # Define longitude ranges for each region
+    regions = {
+        'IO': (20, 90),
+        'PO': (90, 160),
+        'RS': (160, 230),
+        'BAS': (230, 300),
+        'WS': ((300, 360), (0, 20))  # WS spans two intervals
+    }
+
+    # Calculate mean values for each region for each OHA component
+    for region, lon_range in regions.items():
+        if isinstance(lon_range[0], tuple):  # Handle ranges that have two tuples
+            mean_values[region] = {
+                'MLTR Unfiltered': np.nanmean(
+                    masked_oha_components['MLTR Unfiltered'][:, (lon >= lon_range[0][0]) & (lon <= lon_range[0][1])],
+                    axis=(0, 1)),
+                'MLTR Intraseasonal': np.nanmean(
+                    masked_oha_components['MLTR Intraseasonal'][:, (lon >= lon_range[0][0]) & (lon <= lon_range[0][1])],
+                    axis=(0, 1)),
+                'MLTR Seasonal': np.nanmean(
+                    masked_oha_components['MLTR Seasonal'][:, (lon >= lon_range[0][0]) & (lon <= lon_range[0][1])],
+                    axis=(0, 1)),
+                'MLTR Interannual': np.nanmean(
+                    masked_oha_components['MLTR Interannual'][:, (lon >= lon_range[0][0]) & (lon <= lon_range[0][1])],
+                    axis=(0, 1)),
+            }
+            # Add for the second range
+            mean_values[region]['MLTR Unfiltered'] += np.nanmean(
+                masked_oha_components['MLTR Unfiltered'][:, (lon >= lon_range[1][0]) & (lon <= lon_range[1][1])],
+                axis=(0, 1))
+            mean_values[region]['MLTR Intraseasonal'] += np.nanmean(
+                masked_oha_components['MLTR Intraseasonal'][:, (lon >= lon_range[1][0]) & (lon <= lon_range[1][1])],
+                axis=(0, 1))
+            mean_values[region]['MLTR Seasonal'] += np.nanmean(
+                masked_oha_components['MLTR Seasonal'][:, (lon >= lon_range[1][0]) & (lon <= lon_range[1][1])],
+                axis=(0, 1))
+            mean_values[region]['MLTR Interannual'] += np.nanmean(
+                masked_oha_components['MLTR Interannual'][:, (lon >= lon_range[1][0]) & (lon <= lon_range[1][1])],
+                axis=(0, 1))
+        else:  # Normal single range
+            mean_values[region] = {
+                'MLTR Unfiltered': np.nanmean(
+                    masked_oha_components['MLTR Unfiltered'][:, (lon >= lon_range[0]) & (lon <= lon_range[1])],
+                    axis=(0, 1)),
+                'MLTR Intraseasonal': np.nanmean(
+                    masked_oha_components['MLTR Intraseasonal'][:, (lon >= lon_range[0]) & (lon <= lon_range[1])],
+                    axis=(0, 1)),
+                'MLTR Seasonal': np.nanmean(
+                    masked_oha_components['MLTR Seasonal'][:, (lon >= lon_range[0]) & (lon <= lon_range[1])],
+                    axis=(0, 1)),
+                'MLTR Interannual': np.nanmean(
+                    masked_oha_components['MLTR Interannual'][:, (lon >= lon_range[0]) & (lon <= lon_range[1])],
+                    axis=(0, 1)),
+            }
+
+    # Now, let's prepare the data for plotting
+    labels = list(mean_values.keys())
+    mltr_unfiltered_means = [mean_values[label]['MLTR Unfiltered'] for label in labels]
+    mltr_intraseasonal_means = [mean_values[label]['MLTR Intraseasonal'] for label in labels]
+    mltr_seasonal_means = [mean_values[label]['MLTR Seasonal'] for label in labels]
+    mltr_interannual_means = [mean_values[label]['MLTR Interannual'] for label in labels]
+
+    # Set up the bar plot
+    x = np.arange(len(labels))  # the label locations
+    width = 0.2  # the width of the bars
+
+    fig, ax = plt.subplots(figsize=(8.66, 3.50))
+
+    # Plot bars for each OHA component
+    rects1 = ax.bar(x - width * 1.5, mltr_unfiltered_means, width,  color='black')
+    rects2 = ax.bar(x - width / 2, mltr_intraseasonal_means, width,  color='red')
+    rects3 = ax.bar(x + width / 2, mltr_seasonal_means, width,  color='green')
+    rects4 = ax.bar(x + width * 1.5, mltr_interannual_means, width,  color='blue')
+
+
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    ax.set_ylabel('Mean Value')
+    ax.set_title('RESIDUAL')
+    ax.set_xticks(x)
+    ax.set_ylim(-0.100,0.100)
+    ax.set_xticklabels(labels)
+
+    # Show the plot
+    plt.tight_layout()
+
+
+    output_path = "C:/Users/Janki/Downloads/4 pdf/heat data/FINAL/barplot/RES/2021.png"
+
+    plt.savefig(output_path, bbox_inches='tight', dpi=300)
+
