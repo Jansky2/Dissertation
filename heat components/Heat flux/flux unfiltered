@@ -1,0 +1,242 @@
+
+import matplotlib.pyplot as plt
+import numpy as np
+import netCDF4
+from netCDF4 import num2date
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.ticker as mticker
+
+import netCDF4
+import numpy as np
+from netCDF4 import num2date
+
+# Load the datasets for 2012 and 2013
+file_path_2012 = "C:/Users/Janki/Downloads/MERGE_FLUX/2017.nc"
+file_path_2013 = "C:/Users/Janki/Downloads/MERGE_FLUX/2018.nc"
+
+heat_data_2012 = netCDF4.Dataset(file_path_2012, 'r')
+heat_data_2013 = netCDF4.Dataset(file_path_2013, 'r')
+
+# Load TIME variables from both files
+time_var_2012 = heat_data_2012.variables['time']
+time_var_2013 = heat_data_2013.variables['time']
+time_2012 = num2date(time_var_2012[:], units=time_var_2012.units)
+time_2013 = num2date(time_var_2013[:], units=time_var_2013.units)
+
+# Create masks for December 2012 and January-February 2013
+time_mask_2012 = np.array([(date.month == 12 and date.year == 2017) for date in time_2012])
+time_mask_2013 = np.array([(date.month in [1, 2] and date.year == 2018) for date in time_2013])
+
+# Load latitude and longitude variables
+lat = heat_data_2012.variables['yt'][:]
+lon = heat_data_2013.variables['xt'][:]
+
+#2012
+SW_2012 = heat_data_2012.variables['SW'][:]  # Shortwave radiation
+LW_2012 = heat_data_2012.variables['LW'][:]  # Longwave radiation
+LH_2012 = heat_data_2012.variables['LH'][:] *(-1)  # Latent heat flux (multiplied by -1)
+SH_2012 = heat_data_2012.variables['SH'][:] *(-1)  # Sensible heat flux (multiplied by -1)
+TAF_2012 = heat_data_2012.variables['TAF'][:]
+
+# Load heat flux variables for 2013
+SW_2013 = heat_data_2013.variables['SW'][:]  # Shortwave radiation
+LW_2013 = heat_data_2013.variables['LW'][:]  # Longwave radiation
+LH_2013 = heat_data_2013.variables['LH'][:] *(-1)  # Latent heat flux (multiplied by -1)
+SH_2013 = heat_data_2013.variables['SH'][:] *(-1) # Sensible heat flux (multiplied by -1)
+TAF_2013 = heat_data_2013.variables['TAF'][:]  # Total Atmospheric Flux
+
+# Extract values using the time masks for 2012 and 2013
+sw_values_2012 = np.ma.filled(SW_2012[time_mask_2012, :, :],np.nan)
+sw_values_2013 = np.ma.filled(SW_2013[time_mask_2013, :, :], np.nan)
+lw_values_2012 = np.ma.filled(LW_2012[time_mask_2012, :, :],np.nan)
+lw_values_2013 = np.ma.filled(LW_2013[time_mask_2013, :, :],np.nan)
+sh_values_2012 = np.ma.filled(SH_2012[time_mask_2012, :, :],np.nan)
+sh_values_2013 = np.ma.filled(SH_2013[time_mask_2013, :, :],np.nan)
+lh_values_2012 = np.ma.filled(LH_2012[time_mask_2012, :, :],np.nan)
+lh_values_2013 = np.ma.filled(LH_2013[time_mask_2013, :, :],np.nan)
+taf_2012 = np.ma.filled(TAF_2012[time_mask_2012, :, :],np.nan)
+taf_2013 = np.ma.filled(TAF_2013[time_mask_2013, :, :],np.nan)
+
+# Check superposition: TAF should equal the sum of SW, LW, SH, and LH
+sum_of_components = sw_values_2012 + lw_values_2012 + sh_values_2012 + lh_values_2012
+superposition_check = np.allclose(taf_2012, sum_of_components, atol=1e-5, rtol=1e-3)
+
+difference = taf_2012 - sum_of_components
+print("Max difference:", np.nanmax(np.abs(difference)))
+print("Min difference:", np.nanmin(np.abs(difference)))
+
+
+# Print the result
+if superposition_check:
+    print("Superposition holds: yes")
+else:
+    print("Superposition does NOT hold: no")
+
+
+mltr_values_combined = np.concatenate([sw_values_2012, sw_values_2013])
+nahf_values_combined = np.concatenate([lw_values_2012, lh_values_2013])
+ax_values_combined = np.concatenate([lh_values_2012, lh_values_2013])
+ay_values_combined = np.concatenate([sh_values_2012, sh_values_2012])
+taf_values_combined = np.concatenate([taf_2012, taf_2013])
+
+
+# Calculate the mean MLTR, NAHF, OHA, OVE, and Residual for the combined austral summer period
+mltr_mean_combined = np.nanmean(mltr_values_combined, axis=0)
+nahf_mean_combined = np.nanmean(nahf_values_combined, axis=0)
+ax_values_combined = np.nanmean(ax_values_combined, axis=0)
+ay_values_combined = np.nanmean(ay_values_combined, axis=0)
+taf_values_combined = np.nanmean(taf_values_combined, axis=0)
+
+# Mask out the extra region (lat < -60)
+mask = np.where(lat[:, np.newaxis] <= -60, 1, np.nan)
+masked_mltr_mean_combined = np.where(np.isnan(mask), np.nan, mltr_mean_combined)
+masked_nahf_mean_combined = np.where(np.isnan(mask), np.nan, nahf_mean_combined)
+masked_ax_mean_combined = np.where(np.isnan(mask), np.nan, ax_values_combined)
+masked_ay_mean_combined = np.where(np.isnan(mask), np.nan, ay_values_combined)
+maskes_taf_mean_combined = np.where(np.isnan(mask), np.nan, taf_values_combined)
+
+# Calculate a symmetric color limit across all variables
+max_abs_value = np.nanmax(np.abs([masked_mltr_mean_combined, masked_nahf_mean_combined, masked_ax_mean_combined,
+                                  masked_ay_mean_combined, maskes_taf_mean_combined]))
+vmin, vmax = -max_abs_value, max_abs_value
+
+
+
+# Define the masked mean data for each variable
+masked_data = {
+    'SW 2017': masked_mltr_mean_combined,
+    'LW 2017': masked_nahf_mean_combined,
+    'SH 2017': masked_ax_mean_combined,
+    'LH 2017': masked_ay_mean_combined,
+    'TAF 2017': maskes_taf_mean_combined
+
+}
+
+
+# Create the figure and axes
+fig, axes = plt.subplots(nrows=1, ncols=5, figsize=(15, 10), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+# Create a land feature for masking land areas
+land_feature = cfeature.NaturalEarthFeature(
+    'physical', 'land', '50m', edgecolor='k', facecolor='white')
+
+
+
+# Iterate over the masked data and create each plot
+for i, (title, data) in enumerate(masked_data.items()):
+    ax = axes.flat[i]
+    # Add land feature for masking
+    ax.add_feature(land_feature)
+
+    # Add coastline and borders
+    ax.add_feature(cfeature.COASTLINE)
+    ax.add_feature(cfeature.BORDERS)
+
+    # Remove axis ticks and labels
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.axis('off')
+
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.5, color='gray', alpha=0.5,
+                      linestyle='--')
+    gl.ylocator = mticker.FixedLocator([-90, -80, -70, -60])
+    gl.xlines = False
+    gl.ylabel_style = {'size': 12, 'color': 'black'}
+    gl.xlabel_style = {'size': 12, 'color': 'black'}
+    gl.xlines = False
+
+
+
+    ax.text(20, -60, '(20)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(90, -60, '(90)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(160, -60, '(160)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(230, -60, '(230)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(300, -60, '(300)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+    print(lon.shape)
+    print(data.shape)
+    print(lat.shape)
+
+
+# Create the figure and axes
+fig, axes = plt.subplots(nrows=1, ncols=5, figsize=(15, 10), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+# Create a land feature for masking land areas
+land_feature = cfeature.NaturalEarthFeature('physical', 'land', '50m', edgecolor='k', facecolor='white')
+
+# Iterate over the masked data and create each plot
+for i, (title, data) in enumerate(masked_data.items()):
+    ax = axes.flat[i]
+
+    # Add land feature for masking
+    ax.add_feature(land_feature)
+
+    # Add coastline and borders
+    ax.add_feature(cfeature.COASTLINE)
+    ax.add_feature(cfeature.BORDERS)
+
+    # Remove axis ticks and labels
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.axis('off')
+
+    # Add gridlines
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.5, color='gray', alpha=0.5,
+                      linestyle='--')
+    gl.ylocator = mticker.FixedLocator([-90, -80, -70, -60])
+    gl.xlines = False
+    gl.ylabel_style = {'size': 12, 'color': 'black'}
+    gl.xlabel_style = {'size': 12, 'color': 'black'}
+
+    # Plot the data using pcolormesh
+    pcm = ax.pcolormesh(lon, lat, data, cmap='seismic', shading='auto', vmin=-300, vmax=300,
+                        transform=ccrs.PlateCarree())
+
+    # Set plot extent and title
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+    ax.set_title(title, fontsize=14)
+
+    # Add vertical lines for region separation
+    for lon_line in [20, 90, 160, 230, 300]:
+        ax.plot([lon_line, lon_line], [-90, -60], color='black', linestyle='-', transform=ccrs.PlateCarree())
+
+
+    # Add vertical lines for region separation
+    for lon_line in [20, 90, 160, 230, 300]:
+        ax.plot([lon_line, lon_line], [-90, -60], color='black', linestyle='-', transform=ccrs.PlateCarree())
+
+    # Calculate mean values for the 5 regions
+    mean_io = np.nanmean(data[:, (lon >= 20) & (lon <= 90)], axis=(0, 1))
+    mean_po = np.nanmean(data[:, (lon >= 90) & (lon <= 160)], axis=(0, 1))
+    mean_rs = np.nanmean(data[:, (lon >= 160) & (lon <= 230)], axis=(0, 1))
+    mean_bas = np.nanmean(data[:, (lon >= 230) & (lon <= 300)], axis=(0, 1))
+    mean_ws = np.nanmean(data[:, ((lon >= 300) & (lon <= 360)) | ((lon >= 0) & (lon <= 20))], axis=(0, 1))
+
+
+
+
+
+
+
+    # Display mean values as text on the plot
+    ax.text(40, -80, f'(IO): {mean_io:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(120, -80, f'(PO): {mean_po:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(200, -60, f'(RS): {mean_rs:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(260, -55, f'(BAS): {mean_bas:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+    ax.text(320, -70, f'(WS): {mean_ws:.2f}', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+    # Display mean values as text on the plot
+
+# Add colorbar
+cbar_ax = fig.add_axes([0.92, 0.3, 0.02, 0.4])
+fig.colorbar(pcm, cax=cbar_ax, label='SI Unit: W/m^2')
+plt.subplots_adjust(right=0.878, left=0.02, bottom=0.015, top=0.985, wspace=0.256, hspace=0.2)
+
+#save plot
+output_path = "C:/Users/Janki/Downloads/4 pdf/heat data/atm_flux/unfilter_flux/unfilter_2017"
+plt.savefig(output_path, bbox_inches='tight', dpi=300)
+
