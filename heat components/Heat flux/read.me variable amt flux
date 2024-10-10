@@ -1,0 +1,22 @@
+import netCDF4
+
+file_path_unfiltered = "C:/Users/Janki/Downloads/combined_flux_2013_FINAL.nc"
+dataset = netCDF4.Dataset(file_path_unfiltered, 'r')
+
+print(dataset)
+
+# Print all variable names, their shapes, and units (if available)
+for var_name in dataset.variables:
+    var_data = dataset.variables[var_name]
+
+    # Get the variable shape
+    shape = var_data.shape
+
+    # Check if the variable has a 'units' attribute
+    units = var_data.units if 'units' in var_data.ncattrs() else 'No units'
+
+    # Print the variable name, shape, and units
+    print(f"Variable '{var_name}' has shape {shape} and units: {units}")
+
+
+
