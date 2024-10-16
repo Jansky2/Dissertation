@@ -1,4 +1,4 @@
-
+''' 
 import netCDF4 as nc
 import numpy as np
 
@@ -91,7 +91,105 @@ lh_var.long_name = 'Latent Heat Flux'
 sh_var.long_name = 'Sensible Heat Flux'
 taf_var.long_name = 'Total Atmospheric Flux'
 
+
 # Close the new NetCDF file
 new_data.close()
 
 print(f"New NetCDF file saved at: {output_file_path}")
+
+
+'''
+#####################################################################################################################################################################
+final merge 
+
+
+import netCDF4 as nc
+import numpy as np
+
+file_path_LW = "C:/Users/Janki/Downloads/atmos_flux/LW/LW/2021/regrid_LW.nc"
+data_LW = nc.Dataset(file_path_LW, 'r')
+
+file_path_SW = "C:/Users/Janki/Downloads/atmos_flux/SW/SW/2021/regrid_SW.nc"
+data_SW = nc.Dataset(file_path_SW, 'r')
+
+# Load the datasets
+file_path_SH = "C:/Users/Janki/Downloads/atmos_flux/SH/SH/2021/regrid_SH.nc"
+data_SH= nc.Dataset(file_path_SH, 'r')
+
+file_path_LH = "C:/Users/Janki/Downloads/atmos_flux/LH/LH/2021/regrid_LH.nc"
+data_LH = nc.Dataset(file_path_LH, 'r')
+
+# Extract the heat flux variables
+SW = data_SW.variables['SW'][:]  # Shortwave radiation
+LW = data_LW.variables['LW'][:]  # Longwave radiation
+LH = data_LH.variables['LH'][:]  * (-1) # Latent heat flux
+SH = data_SH.variables['SH'][:] * (-1) # Sensible heat flux
+
+print('sw', SW.shape)
+print('lw', LW.shape)
+print('lh', LH.shape)
+print('sh', SH.shape)
+
+
+
+
+# Save SW, LW, SH, LH, and TAF to a new NetCDF file
+output_file_path = "C:/Users/Janki/Downloads/test_2021.nc"
+new_data = nc.Dataset(output_file_path, 'w', format='NETCDF4')
+
+# Create dimensions (copy from one of the input files)
+xt_dim = new_data.createDimension('xt', data_SW.dimensions['xt'].size)  # Longitude
+yt_dim = new_data.createDimension('yt', data_SW.dimensions['yt'].size)  # Latitude
+time_dim = new_data.createDimension('time', data_SW.dimensions['time'].size)  # Time
+
+
+# Create variables for xt, yt, and time
+xt = new_data.createVariable('xt', np.float64, ('xt',))
+yt = new_data.createVariable('yt', np.float64, ('yt',))
+time = new_data.createVariable('time', np.float64, ('time',))
+
+# Copy xt, yt, and time data from one of the input files
+xt[:] = data_SW.variables['xt'][:]  # Longitude values
+yt[:] = data_SW.variables['yt'][:]  # Latitude values
+time[:] = data_SW.variables['time'][:]
+
+xt.units = 'degrees_E'
+yt.units = 'degrees_N'
+time.units = 'days since 1900-01-01 00:00:00'
+
+# Create variables for SW, LW, SH, LH, and TAF (use float32 for consistency)
+sw_var = new_data.createVariable('SW', np.float32, ('time', 'yt', 'xt'))
+lw_var = new_data.createVariable('LW', np.float32, ('time', 'yt', 'xt'))
+lh_var = new_data.createVariable('LH', np.float32, ('time', 'yt', 'xt'))
+sh_var = new_data.createVariable('SH', np.float32, ('time', 'yt', 'xt'))
+taf_var = new_data.createVariable('TAF', np.float32, ('time', 'yt', 'xt'))
+
+TAF = SW + LW + SH + LH
+
+# Write the data to the variables
+sw_var[:] = SW
+lw_var[:] = LW
+lh_var[:] = LH
+sh_var[:] = SH
+taf_var[:] = TAF
+
+
+
+
+# Add attributes (optional, describing the variables)
+sw_var.units = 'W/m^2'
+lw_var.units = 'W/m^2'
+lh_var.units = 'W/m^2'
+sh_var.units = 'W/m^2'
+taf_var.units = 'W/m^2'
+
+sw_var.long_name = 'Shortwave Radiation'
+lw_var.long_name = 'Longwave Radiation'
+lh_var.long_name = 'Latent Heat Flux'
+sh_var.long_name = 'Sensible Heat Flux'
+taf_var.long_name = 'Total Atmospheric Flux'
+
+print(f"New NetCDF file saved at: {output_file_path}")
+
+
+
