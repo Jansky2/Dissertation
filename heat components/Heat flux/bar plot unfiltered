@@ -1,0 +1,101 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import netCDF4
+from netCDF4 import num2date
+
+# Load the dataset for the year 2023 (example)
+file_path_2023 = "C:/Users/Janki/Downloads/test_2023.nc"
+heat_data_2023 = netCDF4.Dataset(file_path_2023, 'r')
+
+# Load TIME variable from the file
+time_var_2023 = heat_data_2023.variables['time']
+time_2023 = num2date(time_var_2023[:], units=time_var_2023.units)
+
+# Create a mask for January-February 2023 (austral summer)
+time_mask_2023 = np.array([(date.month in [1, 2] and date.year == 2023) for date in time_2023])
+
+# Load latitude and longitude variables
+lat = heat_data_2023.variables['yt'][:]
+lon = heat_data_2023.variables['xt'][:]
+
+# Extract SW, LW, SH, LH, and TAF data for January-February 2023
+sw_values_2023 = np.ma.filled(heat_data_2023.variables['SW'][time_mask_2023, :, :], np.nan)
+lw_values_2023 = np.ma.filled(heat_data_2023.variables['LW'][time_mask_2023, :, :], np.nan)
+sh_values_2023 = np.ma.filled(heat_data_2023.variables['SH'][time_mask_2023, :, :], np.nan)
+lh_values_2023 = np.ma.filled(heat_data_2023.variables['LH'][time_mask_2023, :, :], np.nan)
+taf_values_2023 = np.ma.filled(heat_data_2023.variables['TAF'][time_mask_2023, :, :], np.nan)
+
+# Mask out the extra region (lat < -60)
+mask = np.where(lat[:, np.newaxis] <= -60, 1, np.nan)
+masked_sw_values = np.where(np.isnan(mask), np.nan, np.nanmean(sw_values_2023, axis=0))
+masked_lw_values = np.where(np.isnan(mask), np.nan, np.nanmean(lw_values_2023, axis=0))
+masked_sh_values = np.where(np.isnan(mask), np.nan, np.nanmean(sh_values_2023, axis=0))
+masked_lh_values = np.where(np.isnan(mask), np.nan, np.nanmean(lh_values_2023, axis=0))
+masked_taf_values = np.where(np.isnan(mask), np.nan, np.nanmean(taf_values_2023, axis=0))
+
+# Calculate mean values for the 5 regions (IO, PO, RS, BAS, WS)
+def calculate_mean_by_region(data, lon):
+    mean_io = np.nanmean(data[:, (lon >= 20) & (lon <= 90)], axis=(0, 1))
+    mean_po = np.nanmean(data[:, (lon >= 90) & (lon <= 160)], axis=(0, 1))
+    mean_rs = np.nanmean(data[:, (lon >= 160) & (lon <= 230)], axis=(0, 1))
+    mean_bas = np.nanmean(data[:, (lon >= 230) & (lon <= 300)], axis=(0, 1))
+    mean_ws = np.nanmean(data[:, ((lon >= 300) & (lon <= 360)) | ((lon >= 0) & (lon <= 20))], axis=(0, 1))
+    return [mean_io, mean_po, mean_rs, mean_bas, mean_ws]
+
+# Calculate mean for each component
+mean_sw = calculate_mean_by_region(masked_sw_values, lon)
+mean_lw = calculate_mean_by_region(masked_lw_values, lon)
+mean_sh = calculate_mean_by_region(masked_sh_values, lon)
+mean_lh = calculate_mean_by_region(masked_lh_values, lon)
+mean_tf = calculate_mean_by_region(masked_taf_values, lon)
+
+# Define the regions and components
+regions = ['IO', 'PO', 'RS', 'BAS', 'WS']
+components = ['SW', 'LW', 'SH', 'LH', 'TF']
+
+# Create dictionary of means for each component
+mean_values = {
+    'SW': mean_sw,
+    'LW': mean_lw,
+    'SH': mean_sh,
+    'LH': mean_lh,
+    'TF': mean_tf
+}
+
+# Define bar width
+bar_width = 0.15
+
+# Set up the plot
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# Define positions for each bar group
+positions = np.arange(len(regions))
+
+# Define a color map for each component
+color_map = {
+    'SW': 'red',
+    'LW': 'blue',
+    'SH': 'green',
+    'LH': 'purple',
+    'TF': 'black'
+}
+
+# Plot bars for each component with specified colors
+for i, component in enumerate(components):
+    ax.bar(positions + i * bar_width, mean_values[component], width=bar_width,
+           label=component, color=color_map[component])
+
+# Plot bars for each component
+
+# Add labels and title
+ax.set_xticks(positions + (len(components) - 1) * bar_width / 2)
+ax.set_xticklabels(regions)
+ax.set_ylim(-300, 300)
+ax.set_xlabel('Regions')
+ax.set_ylabel('Mean Values')
+ax.set_title('Mean Values of SW, LW, SH, LH, and TF Across Regions (2023)')
+ax.legend()
+
+# Show plot
+plt.tight_layout()
+plt.show()
