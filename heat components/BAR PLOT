@@ -1,0 +1,141 @@
+
+import numpy as np
+import netCDF4
+import matplotlib.pyplot as plt
+from scipy import signal
+from datetime import datetime
+
+# Load the SIC data (unfiltered)
+file_path_unfiltered = "C:/Users/Janki/Downloads/heat budget data/combined_heat_budget_2014_2023.nc"
+sic_unfiltered = netCDF4.Dataset(file_path_unfiltered, 'r')
+
+lat = sic_unfiltered.variables['YT_OCEAN'][:]
+lon = sic_unfiltered.variables['XT_OCEAN81_440'][:]
+sic_values_unfiltered = np.ma.filled(sic_unfiltered.variables['F'][:], np.nan)
+time_units = sic_unfiltered.variables['TIME'][:]
+print("Time units shape:", time_units.shape)
+print("Data shape:", sic_values_unfiltered.shape)
+
+# Replace any values greater than a reasonable threshold (e.g., 1e5) with np.nan
+sic_values_unfiltered[sic_values_unfiltered > 1e5] = np.nan
+
+# Function to apply Butterworth low-pass filter
+def butterworth_lowpass_filter(data, cutoff_time, axis=0):
+    cutoff_freq = 1 / cutoff_time
+    nyquist_freq = 0.5
+    normalized_cutoff_freq = cutoff_freq / nyquist_freq
+    order = 4
+
+    B, A = signal.butter(order, normalized_cutoff_freq, btype='low', analog=False, output='ba')
+    filtered_data = signal.filtfilt(B, A, data, axis=axis)
+    return filtered_data
+
+# Function to get time indices for the entire year
+def calculate_year_indices(year):
+    start_index = 365 * (year - 2014)  # January 1st of the year
+    end_index = 365 * (year - 2014 + 1)  # January 1st of the next year
+    return start_index, end_index
+
+# Define the specific year to plot
+selected_year = 2022
+
+# Calculate time indices for the selected year
+start_index, end_index = calculate_year_indices(selected_year)
+
+# Extract data for the entire year
+sic_values_unfiltered_year = sic_values_unfiltered[start_index:end_index, :, :]
+
+# Check if data is available for the year
+if sic_values_unfiltered_year.shape[0] == 0:
+    print(f"No data available for year {selected_year}.")
+else:
+    # Apply Butterworth low-pass filters
+    sic_150daylow = butterworth_lowpass_filter(sic_values_unfiltered_year, 150, axis=0)
+    sic_400daylow = butterworth_lowpass_filter(sic_values_unfiltered_year, 400, axis=0)
+
+    # Create a mask for regions above -60° latitude
+    mask = np.where(lat < -60, 1, np.nan)
+
+    # Define Antarctic regions (lon_slice specifies the longitudinal bounds for each region)
+    regions = {
+        'IO': {'lon_slice': (20, 90)},
+        'PO': {'lon_slice': (90, 160)},
+        'RS': {'lon_slice': (160, 230)},
+        'BAS': {'lon_slice': (230, 300)},
+        'WS': {'lon_slice': ((300, 360), (0, 20))}  # WS crosses the prime meridian
+    }
+
+
+    def extract_region_data(region, data, lat, lon):
+        # Extract the region's longitude slice
+        lon_slice = region['lon_slice']
+
+        if isinstance(lon_slice[0], tuple):  # Check if the region spans the prime meridian
+            lon_mask_1 = (lon >= lon_slice[0][0]) & (lon <= lon_slice[0][1])  # First part
+            lon_mask_2 = (lon >= lon_slice[1][0]) & (lon <= lon_slice[1][1])  # Second part
+            lon_mask = lon_mask_1 | lon_mask_2  # Combine both parts
+        else:
+            lon_mask = (lon >= lon_slice[0]) & (lon <= lon_slice[1])  # Standard range
+
+        lat_mask = (lat >= -90) & (lat <= -60)  # Mask for latitudes within the Antarctic region
+
+        # Apply the masks to extract the data for the selected region
+        region_data = data[:, lat_mask, :][:, :, lon_mask]
+
+        return region_data
+
+
+    # Loop through regions and calculate means for components
+    region_means = {}
+    for region_name, region in regions.items():
+        # Extract data for the region
+        sic_region_unfiltered = extract_region_data(region, sic_values_unfiltered_year, lat, lon)
+        sic_region_150daylow = extract_region_data(region, sic_150daylow, lat, lon)
+        sic_region_400daylow = extract_region_data(region, sic_400daylow, lat, lon)
+
+        # Calculate components for the region
+        sic_150dayhigh = sic_region_unfiltered - sic_region_150daylow  # Intraseasonal
+        sic_bandpass = sic_region_150daylow - sic_region_400daylow  # Seasonal
+        sic_interannual = sic_region_400daylow  # Interannual
+
+        # Calculate mean values for each component
+        mean_unfiltered = np.nanmean(sic_region_unfiltered)
+        mean_intraseasonal = np.nanmean(sic_150dayhigh)
+        mean_seasonal = np.nanmean(sic_bandpass)
+        mean_interannual = np.nanmean(sic_interannual)
+
+        # Store the results
+        region_means[region_name] = {
+            'Unfiltered': mean_unfiltered,
+            'Intraseasonal': mean_intraseasonal,
+            'Seasonal': mean_seasonal,
+            'Interannual': mean_interannual
+        }
+
+    # Plotting the bar chart for the selected year
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    regions_list = list(region_means.keys())
+    unfiltered_means = [region_means[region]['Unfiltered'] for region in regions_list]
+    intraseasonal_means = [region_means[region]['Intraseasonal'] for region in regions_list]
+    seasonal_means = [region_means[region]['Seasonal'] for region in regions_list]
+    interannual_means = [region_means[region]['Interannual'] for region in regions_list]
+
+    bar_width = 0.2
+    index = np.arange(len(regions_list))
+
+    ax.bar(index, unfiltered_means, bar_width, label='Unfiltered', color='black')
+    ax.bar(index + bar_width, intraseasonal_means, bar_width, label='Intraseasonal', color='red')
+    ax.bar(index + 2 * bar_width, seasonal_means, bar_width, label='Seasonal', color='green')
+    ax.bar(index + 3 * bar_width, interannual_means, bar_width, label='Interannual', color='blue')
+
+    ax.set_xlabel('Regions')
+    ax.set_ylabel('NAHF, unit:°C/day')
+    ax.set_title(f'NAHF {selected_year}')
+    ax.set_xticks(index + 1.5 * bar_width)
+    ax.set_ylim(-0.020,0.020)
+    ax.set_xticklabels(regions_list)
+    ax.legend()
+
+    plt.tight_layout()
+    plt.show()
