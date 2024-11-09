@@ -1,0 +1,313 @@
+
+import numpy as np
+import netCDF4
+import matplotlib.pyplot as plt
+from scipy import signal
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from datetime import datetime
+import matplotlib.ticker as mticker
+
+
+
+# Load the SIC data (unfiltered)
+file_path_unfiltered_1 = "C:/Users/Janki/Downloads/MOMSIS SST AND SIC/momsis yearly data sst/MOMSIS_SST_2017year.nc"
+sic_unfiltered_1 = netCDF4.Dataset(file_path_unfiltered_1, 'r')
+
+file_path_unfiltered_2 = "C:/Users/Janki/Downloads/MOMSIS SST AND SIC/momsis yearly data sst/MOMSIS_SST_2018year.nc"
+sic_unfiltered_2 = netCDF4.Dataset(file_path_unfiltered_2, 'r')
+
+
+file_path_unfiltered_3 = "C:/Users/Janki/Downloads/MOMSIS SST AND SIC/momsis yearly data sst/MOMSIS_SST_2019year.nc"
+sic_unfiltered_3 = netCDF4.Dataset(file_path_unfiltered_3, 'r')
+
+
+lat = sic_unfiltered_1.variables['yt_ocean'][:]
+lon = sic_unfiltered_1.variables['xt_ocean'][:]
+
+sic_values_unfiltered_1 = (sic_unfiltered_1.variables['SST_REGRID'][:])
+
+sic_values_unfiltered_2 =(sic_unfiltered_2.variables['SST_REGRID'][:])
+
+sic_values_unfiltered_3 = (sic_unfiltered_3.variables['SST_REGRID'][:])
+
+
+time_units_1 = sic_unfiltered_1.variables['TIME'][:]
+time_units_2 = sic_unfiltered_2.variables['TIME'][:]
+time_units_3 = sic_unfiltered_3.variables['TIME'][:]
+
+
+sic_values_unfiltered =  np.concatenate((sic_values_unfiltered_1, sic_values_unfiltered_2, sic_values_unfiltered_3), axis=0)
+time_units = np.concatenate((time_units_1, time_units_2, time_units_3), axis=0)
+
+print("Time units shape:", time_units.shape)
+print("Data shape:", sic_values_unfiltered.shape)
+sic_values_unfiltered = np.nan_to_num(sic_values_unfiltered, nan=0)
+sic_values_unfiltered = np.ma.masked_invalid(sic_values_unfiltered)
+print(np.isnan(sic_values_unfiltered).sum())  # Number of NaN values
+
+import numpy as np
+
+# Step 1: Calculate time difference and handle potential issues
+time_diff = np.diff(time_units[:])
+
+# Check for zero or negative time differences
+print("Number of zero time differences:", np.sum(time_diff == 0))
+print("Minimum time difference:", np.min(time_diff))
+
+# Replace zero or negative time differences with a small positive number to avoid NaN
+time_diff[time_diff <= 0] = 1e-6  # A small positive number
+
+# Step 2: Calculate SIC difference
+sic_diff = np.diff(sic_values_unfiltered, axis=0)
+
+# Step 3: Calculate SIC rate and handle potential issues
+try:
+    # Reshape `time_diff` for broadcasting
+    time_diff_reshaped = time_diff[:, np.newaxis, np.newaxis]
+
+    # Calculate SIC rate with proper handling of division
+    sic_rate = np.divide(sic_diff, time_diff_reshaped)
+
+    # Step 4: Pad the result with NaN at the start to match the original time dimension
+    sic_rate_padded = np.vstack((
+        np.full((1, sic_rate.shape[1], sic_rate.shape[2]), np.nan),  # Pad with NaN
+        sic_rate
+    ))
+
+    # Replace `sic_values_unfiltered` with the calculated SIC rate
+    sic_values_unfiltered = sic_rate_padded
+
+    # Debugging: Check the number of NaN values and shape of data
+    print("Number of NaN values in SIC rate:", np.isnan(sic_values_unfiltered).sum())
+    print("SIC rate shape:", sic_values_unfiltered.shape)
+
+except Exception as e:
+    print("Error in SIC rate calculation:", str(e))
+
+
+# Check the shape of the new array to confirm padding
+print(sic_values_unfiltered.shape)
+print(sic_values_unfiltered.shape)
+
+# Function to convert date to days since 1978-01-01
+def days_since_1978(date):
+    origin = datetime(1900, 1, 1)
+    delta = date - origin
+    return delta.days
+
+
+# Function to apply Butterworth low-pass filter
+def butterworth_lowpass_filter(data, cutoff_time, axis=0):
+    cutoff_freq = 1 / cutoff_time
+    nyquist_freq = 0.5
+    normalized_cutoff_freq = cutoff_freq / nyquist_freq
+    order = 4
+
+    B, A = signal.butter(order, normalized_cutoff_freq, btype='low', analog=False, output='ba')
+    filtered_data = signal.filtfilt(B, A, data, axis=axis)
+    return filtered_data
+
+
+def calculate_indices(year):
+    dec_index = 365 * (year - 2017) + 334  # December 1st
+    jan_index = 365 * (year - 2017 + 1)  # January 1st
+    feb_index = 365 * (year - 2017 + 1) + 31  # February 1st
+    return dec_index, jan_index, feb_index
+
+
+# Define the range of years to plot
+start_year = 2017
+end_year = 2018
+
+# Set up the figure and subplots
+fig, axes = plt.subplots(nrows=end_year - start_year + 1, ncols=4, figsize=(25, 5 * (end_year - start_year + 1)),
+                         subplot_kw={'projection': ccrs.Stereographic(central_longitude=0, central_latitude=-90)})
+
+land_feature = cfeature.NaturalEarthFeature(
+    'physical', 'land', '50m',
+    edgecolor='black', facecolor='white')
+
+
+# Initialize lists to store the pcolormesh handles
+pcms = []
+
+# Loop through each year and plot the austral summer ICE average
+for i, year in enumerate(range(start_year, end_year + 1)):
+    dec_index, jan_index, feb_index = calculate_indices(year)
+
+    # Extract data for the austral summer
+    start_time_units = days_since_1978(datetime(year, 12, 1))
+    end_time_units = days_since_1978(datetime(year + 1, 2, 28))
+
+    mask_time = (time_units >= start_time_units) & (time_units <= end_time_units)
+    sic_values_unfiltered_year = sic_values_unfiltered[mask_time, :, :]
+
+    # Before filtering, apply a mask and fill with the nearest valid values using interpolation
+    sic_values_unfiltered = np.ma.masked_invalid(sic_values_unfiltered)
+
+
+    # Perform temporal interpolation to fill NaNs
+    def interpolate_nans(data):
+        for i in range(data.shape[1]):
+            for j in range(data.shape[2]):
+                valid_mask = ~data[:, i, j].mask
+                if np.sum(valid_mask) > 1:  # Only interpolate if we have more than one valid value
+                    data[:, i, j] = np.interp(
+                        np.arange(data.shape[0]),
+                        np.where(valid_mask)[0],
+                        data[:, i, j][valid_mask]
+                    )
+        return data
+
+
+    sic_values_unfiltered = interpolate_nans(sic_values_unfiltered)
+
+    # Verify the number of NaNs after interpolation
+    print("Number of NaNs after interpolation:", np.sum(np.isnan(sic_values_unfiltered)))
+
+    # Now apply the Butterworth filter
+    sic_150daylow = butterworth_lowpass_filter(sic_values_unfiltered, 150, axis=0)
+    print(f"NaNs in 150-day low filtered SIC: {np.sum(np.isnan(sic_150daylow))}")
+
+    sic_400daylow = butterworth_lowpass_filter(sic_values_unfiltered, 400, axis=0)
+    print(f"NaNs in 400-day low filtered SIC: {np.sum(np.isnan(sic_400daylow))}")
+
+    # Adjust sic_400daylow indexing to match the time dimension of sic_values_unfiltered_year
+
+    print(f"Year {year} - Shape of extracted data:", sic_values_unfiltered_year.shape)
+
+    if sic_values_unfiltered_year.shape[0] == 0:
+        print(f"No data available for year {year}.")
+        continue
+
+    # Apply Butterworth low-pass filters
+    sic_150daylow = butterworth_lowpass_filter(sic_values_unfiltered, 150, axis=0)
+    print(f"NaNs in 150-day low filtered SIC: {np.sum(np.isnan(sic_150daylow))}")
+
+    # Calculate the mean for DJF (December-January-February)
+    sic_150daylow = np.ma.mean([sic_150daylow[dec_index, :, :],
+                                sic_150daylow[jan_index, :, :],
+                                sic_150daylow[feb_index, :, :]], axis=0)
+
+    print("Number of NaNs after calculating mean (150-day):", np.sum(np.isnan(sic_150daylow)))
+
+    # Repeat for 400-day low-pass filter
+    sic_400daylow = butterworth_lowpass_filter(sic_values_unfiltered, 400, axis=0)
+    print(f"NaNs in 400-day low filtered SIC: {np.sum(np.isnan(sic_400daylow))}")
+
+    # Calculate the mean for DJF (December-January-February)
+    sic_400daylow = np.ma.mean([sic_400daylow[dec_index, :, :],
+                                sic_400daylow[jan_index, :, :],
+                                sic_400daylow[feb_index, :, :]], axis=0)
+
+    print("Number of NaNs after calculating mean (400-day):", np.sum(np.isnan(sic_400daylow)))
+
+    # Create a mask to hide regions above -60° latitude
+    mask = np.where(lat < -60, 1, np.nan)
+    sic_400daylow = sic_400daylow * mask[:, np.newaxis]
+
+    # Calculate components
+    sic_150dayhigh = sic_values_unfiltered_year - sic_150daylow  # Intraseasonal
+    sic_bandpass = sic_150daylow - (sic_400daylow )  # Seasonal
+    sic_interannual = sic_400daylow  # Interannual
+
+
+    mask_1 = np.where(lat[:, np.newaxis] <= -60, 1, np.nan)
+
+    sic_values_unfiltered_year = sic_values_unfiltered_year * mask_1[np.newaxis, :, :]
+    sic_150dayhigh = sic_150dayhigh * mask_1[np.newaxis, :, :]
+    sic_bandpass = sic_bandpass * mask_1[np.newaxis, :, :]
+    sic_interannual = sic_interannual * mask_1[np.newaxis, :, :]
+
+    # Define titles for the plots
+    titles = [
+        f'Unfiltered MLTR ({year})',
+        'Intraseasonal',
+        'Seasonal',
+        'Interannual'
+    ]
+
+    # Plot each component for the current year
+    for j, (data, title) in enumerate(
+            zip(
+                [
+                    sic_values_unfiltered_year.mean(axis=0),
+                    sic_150dayhigh.mean(axis=0),
+                    sic_bandpass.mean(axis=0),
+                    sic_interannual.mean(axis=0)
+                ],
+                titles
+            )
+    ):
+        ax = axes[i, j]
+
+
+       # pcm = ax.pcolormesh(lon, lat, data, cmap='seismic', shading='auto', vmin=-0.05, vmax=0.05,transform=ccrs.PlateCarree())
+        levels = np.linspace(-0.07, 0.07, 21)
+
+        # Plot data with contourf
+        pcm = ax.contourf(lon, lat, data, levels, cmap='seismic', transform=ccrs.PlateCarree())
+
+        # Store the pcolormesh handles for the common colorbar
+        pcms.append(pcm)
+
+        for lon_line in [20, 90, 160, 230, 300]:
+            ax.plot([lon_line, lon_line], [-90, -60], color='black', linestyle='-', transform=ccrs.PlateCarree())
+
+        ax.add_feature(cfeature.COASTLINE)
+        ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+        ax.set_title(title, fontsize=12)
+
+        # Calculate mean values for the 5 regions
+        mean_io = np.nanmean(data[:, (lon >= 20) & (lon <= 90)], axis=(0, 1))
+        mean_po = np.nanmean(data[:, (lon >= 90) & (lon <= 160)], axis=(0, 1))
+        mean_rs = np.nanmean(data[:, (lon >= 160) & (lon <= 230)], axis=(0, 1))
+        mean_bas = np.nanmean(data[:, (lon >= 230) & (lon <= 300)], axis=(0, 1))
+        mean_ws = np.nanmean(data[:, ((lon >= 300) & (lon <= 360)) | ((lon >= 0) & (lon <= 20))],
+                             axis=(0, 1))
+
+
+        print('mean_io', mean_io)
+        print('mean_po', mean_po)
+        print('mean_rs', mean_rs)
+        print('mean_bas', mean_bas)
+        print('mean_ws', mean_ws)
+
+        # Display mean values as text on the plot
+        ax.text(40, -80, f'(IO): {mean_io:.2f}', fontsize=12, color='black', transform=ccrs.PlateCarree())
+        ax.text(120, -80, f'(PO): {mean_po:.2f}', fontsize=12, color='black', transform=ccrs.PlateCarree())
+        ax.text(200, -60, f'(RS): {mean_rs:.2f}', fontsize=12, color='black', transform=ccrs.PlateCarree())
+        ax.text(260, -55, f'(BAS): {mean_bas:.2f}', fontsize=12, color='black', transform=ccrs.PlateCarree())
+        ax.text(340, -65, f'(WS): {mean_ws:.2f}', fontsize=12, color='black', transform=ccrs.PlateCarree())
+
+        ax.text(20, -60, '(20)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+        ax.text(90, -60, '(90)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+        ax.text(160, -60, '(160)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+        ax.text(230, -60, '(230)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+        ax.text(300, -60, '(300)', fontsize=10, color='black', transform=ccrs.PlateCarree())
+
+        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True, linewidth=1.5, color='gray', alpha=0.5,
+                          linestyle='--')
+        gl.ylocator = mticker.FixedLocator([-90, -80, -70])
+        gl.xlines = False
+        gl.ylabel_style = {'size': 12, 'color': 'black'}
+        gl.xlabel_style = {'size': 12, 'color': 'black'}
+        gl.xlines = False
+        ax.set_xticks([])  # Completely remove any x-axis ticks and labels
+        ax.set_yticks([])  # Completely remove any y-axis ticks and labels
+        ax.axis('off')
+        ax.add_feature(land_feature)
+
+# Add a single common colorbar for all plots
+cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.7])  # Adjust the position and size of the colorbar
+cbar = fig.colorbar(pcms[0], cax=cbar_ax, orientation='vertical', extend='both')
+cbar.set_label('°C/day', fontsize=12)
+cbar.ax.tick_params(labelsize=10)
+
+plt.tight_layout(rect=[0, 0, 0.9, 1])
+plt.subplots_adjust(wspace=0.3, hspace=0.42,top=0.924)
+
+plt.show()
+
